@@ -38,6 +38,8 @@ static constexpr uint32_t HTTP_CONNECT_TIMEOUT_MS = 5000;
 static constexpr uint32_t HTTP_HEADER_TIMEOUT_MS = 15000;
 static constexpr uint32_t DRAIN_GRACE_MS = 2000;
 static constexpr uint32_t DEFAULT_SAMPLE_RATE = 44100;
+static constexpr uint32_t VOLUME_HOLD_MS = 1500;
+static constexpr float VOLUME_TOLERANCE = 0.015f;
 
 static constexpr size_t CONTROL_FRAME_SIZE = 2048;
 static constexpr size_t RECEIVE_BUFFER_SIZE = 2048;
@@ -508,6 +510,16 @@ void SlimprotoMediaSource::handle_setd_(const uint8_t *frame, size_t length) {
 }
 
 void SlimprotoMediaSource::handle_audg_(uint32_t gain) {
+  bool confirms_local_change = false;
+  if (this->volume_hold_active_) {
+    // After a local change the server may still answer earlier changes. Applying those would move the volume back.
+    confirms_local_change = std::fabs(gain_to_volume(gain) - this->volume_hold_target_) < VOLUME_TOLERANCE;
+    if (!confirms_local_change && !time_reached(App.get_loop_component_start_time(), this->volume_hold_until_)) {
+      return;
+    }
+    this->volume_hold_active_ = false;
+  }
+
   if (gain == 0) {
     if (!this->lms_muted_) {
       this->lms_muted_ = true;
@@ -518,6 +530,10 @@ void SlimprotoMediaSource::handle_audg_(uint32_t gain) {
   if (this->lms_muted_) {
     this->lms_muted_ = false;
     this->request_mute_(false);
+  }
+  if (confirms_local_change) {
+    // The server rounds the volume, so keep the exact local value
+    return;
   }
   const float volume = gain_to_volume(gain);
   this->lms_volume_ = volume;
@@ -781,10 +797,15 @@ void SlimprotoMediaSource::handle_command(media_source::MediaSourceCommand comma
 
 void SlimprotoMediaSource::notify_volume_changed(float volume) {
   // Skip changes that came from the server, which would otherwise be echoed back to it
-  if (this->lms_volume_ >= 0.0f && std::fabs(volume - this->lms_volume_) < 0.015f) {
+  if (this->lms_volume_ >= 0.0f && std::fabs(volume - this->lms_volume_) < VOLUME_TOLERANCE) {
     return;
   }
   this->lms_volume_ = volume;
+  if (this->control_state_ == ControlState::CONTROL_STATE_CONNECTED) {
+    this->volume_hold_active_ = true;
+    this->volume_hold_target_ = volume;
+    this->volume_hold_until_ = App.get_loop_component_start_time() + VOLUME_HOLD_MS;
+  }
   char command[24];
   snprintf(command, sizeof(command), "mixer volume %d", static_cast<int>(std::lround(volume * 100.0f)));
   this->queue_cli_command_(command);

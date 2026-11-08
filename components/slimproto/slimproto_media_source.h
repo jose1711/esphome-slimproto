@@ -202,6 +202,9 @@ class SlimprotoMediaSource final : public Component, public media_source::MediaS
   uint32_t current_track_rate_{0};
   uint32_t drain_deadline_{0};
   float lms_volume_{-1.0f};
+  float volume_hold_target_{0.0f};
+  uint32_t volume_hold_until_{0};
+  bool volume_hold_active_{false};
   bool lms_muted_{false};
   bool connected_before_{false};
   bool stream_requested_{false};
