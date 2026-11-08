@@ -4,7 +4,7 @@ An external component that turns an ESP32 into a Squeezebox player for Lyrion Mu
 It plugs into the `speaker_source` media player as a `media_source`, so I2S, the mixer and the
 resampler stay standard ESPHome components.
 
-Status: **first, experimental version.** It has not been tested on a real ESP32 or with a real LMS yet.
+Status: **experimental.** Successfully tested on a Home Assistant Voice PE (ESP32-S3) with a real LMS. Other boards have not been tested.
 
 ## Installation
 
