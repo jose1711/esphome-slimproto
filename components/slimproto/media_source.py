@@ -1,6 +1,6 @@
 import esphome.codegen as cg
-from esphome.components import audio, media_source, psram
 import esphome.config_validation as cv
+from esphome.components import audio, media_source, psram
 from esphome.const import CONF_BUFFER_SIZE, CONF_ID, CONF_PORT, CONF_TASK_STACK_IN_PSRAM
 from esphome.core import CORE
 from esphome.types import ConfigType
