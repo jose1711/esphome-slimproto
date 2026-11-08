@@ -1,0 +1,68 @@
+esphome:
+  name: lms-player
+  friendly_name: Living room
+
+esp32:
+  variant: esp32s3
+  framework:
+    type: esp-idf
+
+psram:
+  mode: octal
+  speed: 80MHz
+
+wifi:
+  ssid: !secret wifi_ssid
+  password: !secret wifi_password
+
+logger:
+api:
+ota:
+  - platform: esphome
+
+external_components:
+  - source:
+      type: local
+      path: components
+    components: [slimproto]
+
+i2s_audio:
+  - id: i2s_output
+    i2s_lrclk_pin: GPIO7
+    i2s_bclk_pin: GPIO8
+
+speaker:
+  - platform: i2s_audio
+    id: i2s_speaker
+    i2s_audio_id: i2s_output
+    dac_type: external
+    i2s_dout_pin: GPIO9
+    channel: stereo
+    bits_per_sample: 16bit
+    sample_rate: 48000
+    buffer_duration: 500ms
+  - platform: resampler
+    id: media_speaker
+    output_speaker: i2s_speaker
+    sample_rate: 48000
+    bits_per_sample: 16
+
+media_source:
+  - platform: slimproto
+    id: lms_source
+    # server: 192.168.1.10    # without this line the server is found automatically
+    # player_name: Living room
+    buffer_size: 512000
+    task_stack_in_psram: true
+
+media_player:
+  - platform: speaker_source
+    id: lms_player
+    name: LMS Player
+    volume_min: 0.4
+    volume_max: 0.9
+    media_pipeline:
+      speaker: media_speaker
+      format: FLAC
+      sources:
+        - lms_source
