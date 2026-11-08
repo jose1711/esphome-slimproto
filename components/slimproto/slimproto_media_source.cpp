@@ -687,11 +687,11 @@ void SlimprotoMediaSource::update_playback_() {
   if (this->track_playing_ && this->get_state() == media_source::MediaSourceState::PLAYING &&
       now - this->last_status_ >= STATUS_INTERVAL_MS) {
     this->last_status_ = now;
-    ESP_LOGD(TAG, "stream buffer %zu/%zu B, output queued %d frames, received %u B, decoding %d",
+    ESP_LOGD(TAG, "stream buffer %zu/%zu B, output queued %d frames, received %u B",
              this->ring_buffer_->available(), this->buffer_size_,
              static_cast<int>(this->frames_written_.load(std::memory_order_relaxed) -
                               this->frames_played_.load(std::memory_order_relaxed)),
-             static_cast<unsigned>(this->bytes_received_.load(std::memory_order_relaxed)), this->decoding_ ? 1 : 0);
+             static_cast<unsigned>(this->bytes_received_.load(std::memory_order_relaxed)));
     this->send_stat_("STMt");
   }
 }
@@ -1048,6 +1048,10 @@ bool SlimprotoMediaSource::receive_body_() {
         break;
       }
       progress = true;
+      if (this->http_phase_ != HttpPhase::HTTP_PHASE_BODY) {
+        // The stream ended while reading the metadata, so the socket is closed
+        return true;
+      }
       continue;
     }
 
