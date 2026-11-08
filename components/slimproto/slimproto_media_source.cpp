@@ -43,6 +43,7 @@ static constexpr float VOLUME_TOLERANCE = 0.015f;
 
 static constexpr size_t CONTROL_FRAME_SIZE = 2048;
 static constexpr size_t RECEIVE_BUFFER_SIZE = 2048;
+static constexpr uint8_t MAX_RECEIVE_PASSES = 16;
 static constexpr size_t PCM_BUFFER_SIZE = 4096;
 static constexpr size_t HTTP_HEADERS_SIZE = 1536;
 static constexpr size_t METADATA_SIZE = 512;
@@ -686,6 +687,11 @@ void SlimprotoMediaSource::update_playback_() {
   if (this->track_playing_ && this->get_state() == media_source::MediaSourceState::PLAYING &&
       now - this->last_status_ >= STATUS_INTERVAL_MS) {
     this->last_status_ = now;
+    ESP_LOGD(TAG, "stream buffer %zu/%zu B, output queued %d frames, received %u B, decoding %d",
+             this->ring_buffer_->available(), this->buffer_size_,
+             static_cast<int>(this->frames_written_.load(std::memory_order_relaxed) -
+                              this->frames_played_.load(std::memory_order_relaxed)),
+             static_cast<unsigned>(this->bytes_received_.load(std::memory_order_relaxed)), this->decoding_ ? 1 : 0);
     this->send_stat_("STMt");
   }
 }
@@ -1033,35 +1039,50 @@ bool SlimprotoMediaSource::receive_headers_() {
 }
 
 bool SlimprotoMediaSource::receive_body_() {
-  if (this->meta_interval_ != 0 && this->meta_next_ == 0) {
-    return this->receive_metadata_();
-  }
-
-  size_t wanted = std::min(this->ring_buffer_->free(), RECEIVE_BUFFER_SIZE);
-  if (this->meta_interval_ != 0) {
-    wanted = std::min<size_t>(wanted, this->meta_next_);
-  }
-  if (wanted == 0) {
-    return false;
-  }
-
-  const ssize_t received = ::recv(this->stream_socket_, this->receive_buffer_, wanted, 0);
-  if (received > 0) {
-    this->ring_buffer_->write_without_replacement(this->receive_buffer_, received, 0);
-    this->bytes_received_.fetch_add(received, std::memory_order_relaxed);
-    if (this->meta_interval_ != 0) {
-      this->meta_next_ -= received;
+  // Drain the socket in one pass. The decoder shares this loop and can block while it waits for the output, so reading
+  // a single small chunk per pass would cap the download speed below the bitrate of high quality streams.
+  bool progress = false;
+  for (uint8_t pass = 0; pass < MAX_RECEIVE_PASSES; pass++) {
+    if (this->meta_interval_ != 0 && this->meta_next_ == 0) {
+      if (!this->receive_metadata_()) {
+        break;
+      }
+      progress = true;
+      continue;
     }
-    return true;
+
+    size_t wanted = std::min(this->ring_buffer_->free(), RECEIVE_BUFFER_SIZE);
+    if (this->meta_interval_ != 0) {
+      wanted = std::min<size_t>(wanted, this->meta_next_);
+    }
+    if (wanted == 0) {
+      break;
+    }
+
+    const ssize_t received = ::recv(this->stream_socket_, this->receive_buffer_, wanted, 0);
+    if (received > 0) {
+      this->ring_buffer_->write_without_replacement(this->receive_buffer_, received, 0);
+      this->bytes_received_.fetch_add(received, std::memory_order_relaxed);
+      if (this->meta_interval_ != 0) {
+        this->meta_next_ -= received;
+      }
+      progress = true;
+      if (static_cast<size_t>(received) < wanted) {
+        break;
+      }
+      continue;
+    }
+    if (received == 0) {
+      this->finish_http_(DisconnectReason::DISCONNECT_REASON_OK);
+      return true;
+    }
+    if (!would_block()) {
+      this->finish_http_(DisconnectReason::DISCONNECT_REASON_REMOTE);
+      return true;
+    }
+    break;
   }
-  if (received == 0) {
-    this->finish_http_(DisconnectReason::DISCONNECT_REASON_OK);
-    return true;
-  }
-  if (!would_block()) {
-    this->finish_http_(DisconnectReason::DISCONNECT_REASON_REMOTE);
-  }
-  return false;
+  return progress;
 }
 
 bool SlimprotoMediaSource::receive_metadata_() {
