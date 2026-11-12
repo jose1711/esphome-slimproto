@@ -40,6 +40,7 @@ static constexpr uint32_t DRAIN_GRACE_MS = 2000;
 static constexpr uint32_t DEFAULT_SAMPLE_RATE = 44100;
 static constexpr uint32_t VOLUME_HOLD_MS = 1500;
 static constexpr float VOLUME_TOLERANCE = 0.015f;
+static constexpr uint32_t AUDG_SETTLE_MS = 400;
 
 static constexpr size_t CONTROL_FRAME_SIZE = 2048;
 static constexpr size_t RECEIVE_BUFFER_SIZE = 2048;
@@ -195,6 +196,10 @@ void SlimprotoMediaSource::setup() {
 void SlimprotoMediaSource::loop() {
   const uint32_t now = App.get_loop_component_start_time();
   this->service_control_();
+  if (this->audg_pending_ && time_reached(now, this->audg_apply_at_)) {
+    this->audg_pending_ = false;
+    this->apply_audg_(this->audg_gain_);
+  }
   this->process_events_();
   this->service_cli_();
   if (now - this->last_update_ >= UPDATE_INTERVAL_MS) {
@@ -511,6 +516,16 @@ void SlimprotoMediaSource::handle_setd_(const uint8_t *frame, size_t length) {
 }
 
 void SlimprotoMediaSource::handle_audg_(uint32_t gain) {
+  // The server fades the volume out when playback stops or pauses and back in when it resumes, sending a series of
+  // gains. Applying them would change the volume of the whole media player, which is shared with other audio such as
+  // voice assistant replies. Wait until the changes settle and apply only the last one.
+  ESP_LOGD(TAG, "Server volume gain %u", static_cast<unsigned>(gain));
+  this->audg_gain_ = gain;
+  this->audg_pending_ = true;
+  this->audg_apply_at_ = App.get_loop_component_start_time() + AUDG_SETTLE_MS;
+}
+
+void SlimprotoMediaSource::apply_audg_(uint32_t gain) {
   bool confirms_local_change = false;
   if (this->volume_hold_active_) {
     // After a local change the server may still answer earlier changes. Applying those would move the volume back.
@@ -522,10 +537,7 @@ void SlimprotoMediaSource::handle_audg_(uint32_t gain) {
   }
 
   if (gain == 0) {
-    if (!this->lms_muted_) {
-      this->lms_muted_ = true;
-      this->request_mute_(true);
-    }
+    // Zero is what the end of a fade out looks like, and muting here would also silence the voice assistant
     return;
   }
   if (this->lms_muted_) {

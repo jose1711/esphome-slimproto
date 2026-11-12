@@ -112,6 +112,7 @@ class SlimprotoMediaSource final : public Component, public media_source::MediaS
   void handle_codc_(const uint8_t *frame, size_t length);
   void handle_setd_(const uint8_t *frame, size_t length);
   void handle_audg_(uint32_t gain);
+  void apply_audg_(uint32_t gain);
   void send_helo_(bool reconnect);
   void send_stat_(const char *event, uint32_t server_timestamp = 0);
   void send_name_();
@@ -206,6 +207,9 @@ class SlimprotoMediaSource final : public Component, public media_source::MediaS
   uint32_t volume_hold_until_{0};
   bool volume_hold_active_{false};
   bool lms_muted_{false};
+  uint32_t audg_gain_{0};
+  uint32_t audg_apply_at_{0};
+  bool audg_pending_{false};
   bool connected_before_{false};
   bool stream_requested_{false};
   bool pending_start_{false};

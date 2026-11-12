@@ -39,11 +39,17 @@ Requires an ESP32 with PSRAM (ESP32-S3 recommended) and ESPHome 2026.10 or newer
 
 - FLAC, MP3 and PCM/WAV; other formats are transcoded by LMS if it is set up to do so
 - start, stop, pause, seek, next track, gapless transitions between tracks
-- volume and mute in both directions, internet radio with metadata
+- volume in both directions, mute from the device to the server, internet radio with metadata
 - control from Home Assistant through the CLI port of the LMS
 
 ## Limitations
 
+- Volume changes from the server are applied after a short delay (about 0.4 s), and only the last value counts.
+  The server fades the volume out when playback stops or pauses and back in when it resumes. Applying every step
+  would change the volume of the whole media player, which is shared with other audio such as voice assistant
+  replies on a Voice PE.
+- A volume of zero or a mute set on the server is ignored for the same reason; it would also silence the other
+  audio. Muting on the device is still reported to the server.
 - When jumping to another track or pausing, the content of the output buffer is still played out (`buffer_duration` of the speaker).
 - Synchronization of multiple players is only basic and its accuracy still needs to be verified.
 - No HTTPS, crossfade or ReplayGain.
